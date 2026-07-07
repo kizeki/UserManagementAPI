@@ -1,8 +1,20 @@
+using System.Collections.Concurrent;
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddOpenApi();
 
 var app = builder.Build();
+
+app.UseExceptionHandler(exceptionHandlerApp =>
+{
+    exceptionHandlerApp.Run(async context =>
+    {
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        context.Response.ContentType = "application/json";
+        await context.Response.WriteAsJsonAsync(new { error = "An unexpected error occurred." });
+    });
+});
 
 if (app.Environment.IsDevelopment())
 {
@@ -11,49 +23,113 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-var users = new List<User>
+var initialUsers = new[]
 {
-    new(1, "Alice Johnson", "alice@example.com"),
-    new(2, "Bob Smith", "bob@example.com")
+    new User(1, "Alice Johnson", "alice@example.com"),
+    new User(2, "Bob Smith", "bob@example.com")
 };
 
-app.MapGet("/users", () => Results.Ok(users));
+var users = new ConcurrentDictionary<int, User>(initialUsers.ToDictionary(user => user.Id));
+var nextId = users.Keys.DefaultIfEmpty(0).Max() + 1;
+
+app.MapGet("/users", () => Results.Ok(users.Values.OrderBy(user => user.Id).ToList()));
 
 app.MapGet("/users/{id:int}", (int id) =>
 {
-    var user = users.FirstOrDefault(u => u.Id == id);
-    return user is null ? Results.NotFound() : Results.Ok(user);
+    if (users.TryGetValue(id, out var user))
+    {
+        return Results.Ok(user);
+    }
+
+    return Results.NotFound();
 });
 
 app.MapPost("/users", (CreateUserRequest request) =>
 {
-    var user = new User(users.Count > 0 ? users.Max(u => u.Id) + 1 : 1, request.Name, request.Email);
-    users.Add(user);
+    if (request is null)
+    {
+        return Results.BadRequest(new { error = "Request body is required." });
+    }
+
+    if (!TryValidateUser(request.Name, request.Email, out var validationError))
+    {
+        return Results.BadRequest(new { error = validationError });
+    }
+
+    var userId = Interlocked.Increment(ref nextId);
+    var user = new User(userId, request.Name.Trim(), request.Email.Trim().ToLowerInvariant());
+    users[userId] = user;
+
     return Results.Created($"/users/{user.Id}", user);
 });
 
 app.MapPut("/users/{id:int}", (int id, UpdateUserRequest request) =>
 {
-    var existingUser = users.FirstOrDefault(u => u.Id == id);
-    if (existingUser is null)
+    if (request is null)
+    {
+        return Results.BadRequest(new { error = "Request body is required." });
+    }
+
+    if (!TryValidateUser(request.Name, request.Email, out var validationError))
+    {
+        return Results.BadRequest(new { error = validationError });
+    }
+
+    if (!users.ContainsKey(id))
     {
         return Results.NotFound();
     }
 
-    var updatedUser = new User(id, request.Name, request.Email);
-    var index = users.FindIndex(u => u.Id == id);
-    users[index] = updatedUser;
+    var updatedUser = new User(id, request.Name.Trim(), request.Email.Trim().ToLowerInvariant());
+    users[id] = updatedUser;
 
     return Results.Ok(updatedUser);
 });
 
 app.MapDelete("/users/{id:int}", (int id) =>
 {
-    var removed = users.RemoveAll(u => u.Id == id);
-    return removed > 0 ? Results.NoContent() : Results.NotFound();
+    var removed = users.TryRemove(id, out _);
+    return removed ? Results.NoContent() : Results.NotFound();
 });
 
 app.Run();
+
+static bool TryValidateUser(string name, string email, out string error)
+{
+    if (string.IsNullOrWhiteSpace(name))
+    {
+        error = "Name is required.";
+        return false;
+    }
+
+    if (string.IsNullOrWhiteSpace(email))
+    {
+        error = "Email is required.";
+        return false;
+    }
+
+    if (!IsValidEmail(email))
+    {
+        error = "Email format is invalid.";
+        return false;
+    }
+
+    error = string.Empty;
+    return true;
+}
+
+static bool IsValidEmail(string email)
+{
+    try
+    {
+        var address = new System.Net.Mail.MailAddress(email);
+        return address.Address == email.Trim();
+    }
+    catch
+    {
+        return false;
+    }
+}
 
 record User(int Id, string Name, string Email);
 record CreateUserRequest(string Name, string Email);
