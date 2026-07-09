@@ -1,0 +1,75 @@
+### Test cases for UserManagementAPI
+### The API uses custom token validation in Program.cs.
+### Missing/invalid Authorization headers return 401 Unauthorized with a JSON body like { "error": "Unauthorized." }.
+
+### 1) Get users without auth -> expect 401 Unauthorized
+GET http://localhost:5165/users
+
+### 2) Get users with wrong token -> expect 401 Unauthorized
+GET http://localhost:5165/users
+Authorization: Bearer wrong-token
+
+### 3) Get users with wrong auth scheme -> expect 401 Unauthorized
+GET http://localhost:5165/users
+Authorization: Token secret-token
+
+### 4) Get users with valid token -> expect 200 OK and a list of users
+GET http://localhost:5165/users
+Authorization: Bearer secret-token
+
+### 5) Get a non-existent user with valid token -> expect 404 Not Found
+GET http://localhost:5165/users/999
+Authorization: Bearer secret-token
+
+### 6) Create a user with valid data -> expect 201 Created
+POST http://localhost:5165/users
+Authorization: Bearer secret-token
+Content-Type: application/json
+
+{
+  "name": "Charlie Brown",
+  "email": "charlie@example.com"
+}
+
+### 7) Create a user with invalid email -> expect 400 Bad Request
+POST http://localhost:5165/users
+Authorization: Bearer secret-token
+Content-Type: application/json
+
+{
+  "name": "Invalid User",
+  "email": "not-an-email"
+}
+
+### 8) Create a user without a request body -> expect 400 Bad Request
+POST http://localhost:5165/users
+Authorization: Bearer secret-token
+Content-Type: application/json
+
+### 9) Update an existing user with valid data -> expect 200 OK
+PUT http://localhost:5165/users/1
+Authorization: Bearer secret-token
+Content-Type: application/json
+
+{
+  "name": "Alice Updated",
+  "email": "alice.updated@example.com"
+}
+
+### 10) Update a non-existent user -> expect 404 Not Found
+PUT http://localhost:5165/users/999
+Authorization: Bearer secret-token
+Content-Type: application/json
+
+{
+  "name": "Ghost User",
+  "email": "ghost@example.com"
+}
+
+### 11) Delete an existing user -> expect 204 No Content
+DELETE http://localhost:5165/users/1
+Authorization: Bearer secret-token
+
+### 12) Delete a non-existent user -> expect 404 Not Found
+DELETE http://localhost:5165/users/999
+Authorization: Bearer secret-token
